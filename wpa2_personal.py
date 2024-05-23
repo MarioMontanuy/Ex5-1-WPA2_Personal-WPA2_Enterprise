@@ -6,13 +6,13 @@ from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 import pyshark
 import pyshark.packet.layers.xml_layer
 import math
-import json
-import xml.etree.ElementTree as ET
+
+
+NONCES = {}
 
 """
 Performs the reading of the file passed as a parameter.
 """
-NONCES = {}
 
 
 def read_file(file):
@@ -20,7 +20,43 @@ def read_file(file):
         return f.read()
 
 
+"""
+Validates that the expected and the result are the same on their first and last characters.
+"""
+
+
+def validate_result_start_end(start_chars, end_chars, result):
+    print("Expected: " + start_chars + "..." + end_chars)
+    print("Result:   " + result)
+    if (
+        start_chars == result[: len(start_chars)]
+        and end_chars == result[-len(end_chars) :]
+    ):
+        print("\nCorrect\n")
+    else:
+        print("\nIncorrect\n")
+
+
+"""
+Validates that the expected and the result are completely equals.
+"""
+
+
+def validate_result_equals(expected, result):
+    print("Expected: " + expected)
+    print("Result:   " + result)
+    if expected == result:
+        print("\nCorrect\n")
+    else:
+        print("\nIncorrect\n")
+
+
 # Question 1
+
+"""
+Derives a PSK (Pre-Shared Key) using PBKDF2 with SHA1.
+Prints and returns the derived PSK.
+"""
 
 
 def question1():
@@ -33,12 +69,16 @@ def question1():
         iterations=4096,
     )
     psk = kdf.derive(password)
-    print("Expected: a22c...b603")
-    print("Solution: " + psk.hex())
+    validate_result_start_end("a22c", "b603", psk.hex())
     return psk
 
 
 # Question 2
+
+"""
+Extracts WPA key nonces from EAPOL handshake packets in a pcap file.
+Stores the nonces in a global dictionary and prints them.
+"""
 
 
 def question2():
@@ -50,15 +90,22 @@ def question2():
                 packet["EAPOL"].get_field_by_showname("WPA Key Nonce").replace(":", "")
             )
             NONCES[message_id] = nonce
-            
+
         except:
             continue
-    print("Handshake message id: 1" + "\nExpected: b6ea...d7d3b\nNonce:    " + NONCES["1"])
-    print("\nHandshake message id: 2" + "\nExpected: e6d8...b61c\nNonce:    " + NONCES["2"])
+    print("Handshake message id: 1")
+    validate_result_start_end("b6ea", "7d3b", NONCES["1"])
+    print("\nHandshake message id: 2")
+    validate_result_start_end("e6d8", "b61c", NONCES["2"])
     capture.close()
 
 
 # Question 3
+
+"""
+Extracts WLAN addresses and nonces from EAPOL packets in a pcap file.
+Constructs and returns the data for the Pairwise Key Expansion.
+"""
 
 
 def get_data():
@@ -75,11 +122,6 @@ def get_data():
         except:
             continue
     capture.close()
-
-    # print("destination_addr: " + destination_addr)
-    # print("transmission_addr: " + transmission_addr)
-    # print("Nonce 1: " + str(NONCES["1"]))
-    # print("Nonce 2: " + str(NONCES["2"]))
     return (
         "Pairwise key expansion".encode()
         + chr(0x00).encode()
@@ -90,10 +132,22 @@ def get_data():
     )
 
 
+"""
+Computes the HMAC of given data using the specified key and algorithm.
+Returns the resulting HMAC.
+"""
+
+
 def HMAC(key, algo, data):
     hash = hmac.HMAC(key, algo)
     hash.update(data)
     return hash.finalize()
+
+
+"""
+Computes a SHA1-based HMAC of given data with a specified key and length.
+Returns the resulting HMAC truncated to the specified length.
+"""
 
 
 def SHA1_HMAC(key, data, length):
@@ -103,15 +157,25 @@ def SHA1_HMAC(key, data, length):
     return r[:length]
 
 
+"""
+Generates a PTK (Pairwise Transient Key) using the derived PSK.
+Prints and returns the PTK.
+"""
+
+
 def question3(psk):
     data = get_data()
     result = SHA1_HMAC(psk, data, 48)
-    print("Expected: 0ffc...8aad")
-    print("Solution: " + result.hex())
+    validate_result_start_end("0ffc", "8aad", result.hex())
     return result
 
 
 # Question 4
+
+"""
+Extracts raw 802.1X EAPOL packets from a pcap file.
+Returns a list of the raw packet data.
+"""
 
 
 def get_packets_802_1X():
@@ -125,12 +189,24 @@ def get_packets_802_1X():
     return packets_802_1X
 
 
+"""
+Computes the MIC (Message Integrity Check) for an 802.1X EAPOL packet.
+Returns the resulting MIC.
+"""
+
+
 def get_mic(kck, mess_i):
     data = mess_i[:81]
     for _ in range(16):
         data += chr(0x00).encode()
     data += mess_i[81 + 16 :]
     return HMAC(kck, hashes.SHA1(), data)[:16]
+
+
+"""
+Validates the MIC for EAPOL handshake messages using the derived PTK.
+Prints the MICs of the packets and the expected values.
+"""
 
 
 def question4(ptk):
@@ -140,17 +216,21 @@ def question4(ptk):
         mess_i = packets_802_1X[i - 1]
         mic = get_mic(kck, mess_i)
         print("Packet: " + str(i))
-        print("mess_i: " + mess_i[81 : 81 + 16].hex())
-        print("MIC:    " + mic.hex() + "\n")
-
+        validate_result_equals(mess_i[81 : 81 + 16].hex(), mic.hex())
 
 # Question 5
 
-# Se ha elegido este orden para las addr1-3 porque TO DS: 1 From DS: 0
+"""
+Extracts data from a specific packet in a pcap file.
+Returns a dictionary containing various fields of the packet.
+It is important to emphasize that this order of addresses has been chosen because in this packet TO DS: 1 From DS: 0.
+"""
 
 
 def get_packet_517_data():
-    capture = pyshark.FileCapture("data/tradio.pcapng", display_filter="frame.number==517")
+    capture = pyshark.FileCapture(
+        "data/tradio.pcapng", display_filter="frame.number==517"
+    )
     packet_data = {}
     packet = capture[0]
     packet_data["fc"] = bytes.fromhex(str(packet.wlan.fc)[2:])
@@ -167,6 +247,12 @@ def get_packet_517_data():
     return packet_data
 
 
+"""
+Constructs and prints the unicast nonce from a specific packet's data.
+Returns the constructed nonce.
+"""
+
+
 def question5(packet_517_data):
     nonce_unicast = (
         packet_517_data["qos_control"][0:1]
@@ -174,12 +260,16 @@ def question5(packet_517_data):
         + packet_517_data["ccpm_par"][0:2]
         + packet_517_data["ccpm_par"][4:8]
     )
-    print("Nonce:    002269a9e50b3500000000000b")
-    print("Solution: " + nonce_unicast.hex())
+    validate_result_equals("002269a9e50b3500000000000b", nonce_unicast.hex())
     return nonce_unicast
 
 
 # Question 6
+
+"""
+Constructs and prints the AAD for a unicast packet.
+Returns the constructed AAD.
+"""
 
 
 def question6(packet_517_data):
@@ -191,12 +281,16 @@ def question6(packet_517_data):
         + 2 * chr(0x00).encode()
         + packet_517_data["qos_control"][0:2]
     )
-    print("AAD:      884184aa9cfd08202269a9e50b3584aa9cfd081f00000000")
-    print("Solution: " + aad_unicast.hex())
+    validate_result_equals("884184aa9cfd08202269a9e50b3584aa9cfd081f00000000", aad_unicast.hex())
     return aad_unicast
 
 
 # Question 7
+
+"""
+Decrypts data using AES-CCM with the specified key, tag length, nonce, and associated data.
+Returns the decrypted plaintext.
+"""
 
 
 def AESCCM_decrypt(key, tag_length, data, nonce, associated_data):
@@ -204,33 +298,49 @@ def AESCCM_decrypt(key, tag_length, data, nonce, associated_data):
     return aesccm.decrypt(nonce, data, associated_data)
 
 
+"""
+Decrypts the data of a specific packet using AES-CCM.
+Prints the decrypted plaintext.
+"""
+
+
 def question7(packet_517_data, tk, nonce_unicast, aad_unicast):
     plaintext = AESCCM_decrypt(
         tk, 8, packet_517_data["data"], nonce_unicast, aad_unicast
     )
-    print("plaintext: aaaa...3637")
-    print("Solution:  " + plaintext.hex())
+    validate_result_start_end("aaaa", "3637", plaintext.hex())
 
 
 # Question 8
+
+"""
+Decrypts the GTK from the EAPOL handshake packets.
+Prints and returns the decrypted GTK.
+"""
 
 
 def question8(kek):
     capture = pyshark.FileCapture("data/tradio.pcapng", display_filter="eapol")
     packet_data = bytes.fromhex(capture[2].eapol.wlan_rsna_keydes_data.replace(":", ""))
-    GTK = aes_key_unwrap(kek, packet_data)
-    print("Expected: 3014...dd00")
-    print("Solution: " + GTK.hex())
+    GTK = aes_key_unwrap(kek, packet_data)[30:46]
+    validate_result_start_end("f3b1", "4ec7", GTK.hex())
     return GTK
 
 
 # Question 9
 
-# Se ha elegido este orden para las addr1-3 porque TO DS: 0 From DS: 1
+
+"""
+Extracts data from a specific packet in a pcap file.
+Returns a dictionary containing various fields of the packet.
+It is important to emphasize that this order of addresses has been chosen because in this packet TO DS: 0 From DS: 1.
+"""
 
 
 def get_packet_527_data():
-    capture = pyshark.FileCapture("data/tradio.pcapng", display_filter="frame.number==527")
+    capture = pyshark.FileCapture(
+        "data/tradio.pcapng", display_filter="frame.number==527"
+    )
     packet_data = {}
     packet = capture[0]
     packet_data["fc"] = bytes.fromhex(str(packet.wlan.fc)[2:])
@@ -246,6 +356,12 @@ def get_packet_527_data():
     return packet_data
 
 
+"""
+Constructs and prints the multicast nonce from a specific packet's data.
+Returns the constructed nonce.
+"""
+
+
 def question9(packet_527_data):
     nonce_multicast = (
         chr(0x00).encode()
@@ -253,12 +369,16 @@ def question9(packet_527_data):
         + packet_527_data["ccpm_par"][0:2]
         + packet_527_data["ccpm_par"][4:8]
     )
-    print("Expected: 0084aa9cfd08200000000008f0")
-    print("Solution: " + nonce_multicast.hex())
+    validate_result_equals("0084aa9cfd08200000000008f0", nonce_multicast.hex())
     return nonce_multicast
 
 
 # Question 10
+
+"""
+Constructs and prints the Additional Authenticated Data (AAD) for a multicast packet.
+Returns the constructed AAD.
+"""
 
 
 def question10(packet_527_data):
@@ -269,12 +389,18 @@ def question10(packet_527_data):
         + packet_527_data["sa_addr3"]
         + 2 * chr(0x00).encode()
     )
-    print("AAD:      0842ffffffffffff84aa9cfd082084aa9cfd081f0000")
-    print("Solution: " + aad_multicast.hex())
+    validate_result_equals("0842ffffffffffff84aa9cfd082084aa9cfd081f0000", aad_multicast.hex())
     return aad_multicast
 
 
 # Question 11
+
+"""
+Decrypts the data of a specific packet using AES-CCM with the GTK.
+Prints the decrypted plaintext.
+"""
+
+
 def question11(GTK, packet_527_data, nonce_multicast, aad_multicast):
     plaintext = AESCCM_decrypt(
         GTK, 8, packet_527_data["data"], nonce_multicast, aad_multicast
@@ -283,6 +409,12 @@ def question11(GTK, packet_527_data, nonce_multicast, aad_multicast):
 
 
 # Question 12
+
+"""
+Derives a PSK using PBKDF2 with SHA1 for a given password.
+Returns the derived PSK.
+"""
+
 
 def get_psk_q12(password):
     ssid = b"Wifi_Test"
@@ -296,20 +428,18 @@ def get_psk_q12(password):
     return psk
 
 
+"""
+Extracts necessary data from EAPOL handshake packets in a pcap file.
+Constructs and returns the data for the Pairwise Key Expansion.
+"""
+
+
 def get_packet_info_q12():
     capture = pyshark.FileCapture("data/tradio2.pcapng", display_filter="eapol")
-    nonce1 = (
-        capture[0]["EAPOL"].get_field_by_showname("WPA Key Nonce").replace(":", "")
-    )
-    nonce2 = (
-        capture[1]["EAPOL"].get_field_by_showname("WPA Key Nonce").replace(":", "")
-    )
-    transmission_addr = capture[0]["WLAN"].get_field_by_showname(
-        "Transmitter address"
-    )
-    destination_addr = capture[0]["WLAN"].get_field_by_showname(
-        "Destination address"
-    )
+    nonce1 = capture[0]["EAPOL"].get_field_by_showname("WPA Key Nonce").replace(":", "")
+    nonce2 = capture[1]["EAPOL"].get_field_by_showname("WPA Key Nonce").replace(":", "")
+    transmission_addr = capture[0]["WLAN"].get_field_by_showname("Transmitter address")
+    destination_addr = capture[0]["WLAN"].get_field_by_showname("Destination address")
     capture.close()
 
     return (
@@ -321,14 +451,28 @@ def get_packet_info_q12():
         + bytes.fromhex(max(nonce1, nonce2))
     )
 
+
+"""
+Extracts raw data of the second EAPOL packet from a pcap file.
+Returns the raw packet data.
+"""
+
+
 def get_packet2_q12():
     capture = pyshark.FileCapture(
         "data/tradio2.pcapng", display_filter="eapol", use_json=True, include_raw=True
     )
     return capture[1].get_raw_packet()[60:]
 
+
+"""
+Brute forces the WPA2 password by trying different passwords.
+Prints the found password when the MIC matches.
+"""
+
+
 def question12():
-    passwords = [f'Wifi_Test{i}' for i in range(10)]
+    passwords = [f"Wifi_Test{i}" for i in range(10)]
     data = get_packet_info_q12()
     packet2 = get_packet2_q12()
     for password in passwords:
@@ -338,12 +482,14 @@ def question12():
         mess_i = packet2
         mic = get_mic(kck, mess_i)
         if mess_i[81 : 81 + 16].hex() == mic.hex():
-            print("mess_i: " + mess_i[81 : 81 + 16].hex())
-            print("MIC:    " + mic.hex() + "\n")
+            validate_result_equals(mess_i[81 : 81 + 16].hex(), mic.hex())
             print("Password found: " + password)
             break
 
 
+"""
+Main function to run all the questions sequentially.
+"""
 
 
 def main():
@@ -370,7 +516,7 @@ def main():
     print("\n ------ Question 10 ------ \n")
     aad_multicast = question10(packet_527_data)
     print("\n ------ Question 11 ------ \n")
-    question11(GTK[30:46], packet_527_data, nonce_multicast, aad_multicast)
+    question11(GTK, packet_527_data, nonce_multicast, aad_multicast)
     print("\n ------ Question 12 ------ \n")
     question12()
     print("\n ------ End ------ \n")
